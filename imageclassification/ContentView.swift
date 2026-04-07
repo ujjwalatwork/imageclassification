@@ -7,10 +7,13 @@
 
 import SwiftUI
 import PhotosUI
+import CoreML
+import Vision
 
 struct ContentView: View {
     @State private var imageItem: PhotosPickerItem?
     @State private var selectedImage: UIImage?
+    @State private var result: String = ""
     
     var body: some View {
         NavigationStack {
@@ -49,23 +52,18 @@ struct ContentView: View {
                 }
                 .frame(height: 300)
                 .padding(.horizontal)
-                
-                VStack {
-                    Text("Results will be shown here")
-                        .font(.headline)
-                        .multilineTextAlignment(.center)
-                    Text("Results will be shown here")
-                        .font(.headline)
-                        .multilineTextAlignment(.center)
-                    Text("Results will be shown here")
-                        .font(.headline)
-                        .multilineTextAlignment(.center)
+                if !result.isEmpty {
+                    VStack {
+                        Text("\(result)")
+                            .font(.headline)
+                            .multilineTextAlignment(.center)
+                    }
+                    .frame(maxWidth: .infinity)
+                    .padding()
+                    .background(Color.blue.opacity(0.1))
+                    .cornerRadius(15)
+                    .padding(.horizontal)
                 }
-                .frame(maxWidth: .infinity)
-                .padding()
-                .background(Color.blue.opacity(0.1))
-                .cornerRadius(15)
-                .padding(.horizontal)
                 
                 PhotosPicker(selection: $imageItem, matching: .images) {
                     HStack {
@@ -81,7 +79,6 @@ struct ContentView: View {
                     .padding(.horizontal)
                 }
                 .onChange(of: imageItem) { _, newItem in
-                    print("Get net itme")
                     fetchImage(from: newItem)
                 }
             }
@@ -89,15 +86,41 @@ struct ContentView: View {
     }
     
     /// Get image from PhotosPickerItem
-    func fetchImage(from imageItem: PhotosPickerItem?) {
+    private func fetchImage(from imageItem: PhotosPickerItem?) {
         guard let imageItem = imageItem else { return }
         Task {
             if let data = try? await imageItem.loadTransferable(type: Data.self),
                let image = UIImage(data: data) {
+                classifyImage(image: image)
                 DispatchQueue.main.async {
                     selectedImage = image
                 }
             }
+        }
+    }
+    
+    /// Image Classification
+    ///
+    private func classifyImage(image: UIImage) {
+        guard let image = image.cgImage else { return }
+        
+        do {
+            let modelConfig = MLModelConfiguration()
+            let mobileNetModel = try MobileNetV2(configuration: modelConfig).model
+            let coreMLModal = try VNCoreMLModel(for: mobileNetModel)
+            let request = VNCoreMLRequest(model: coreMLModal) { (request, error) in
+                if let results = request.results as? [VNClassificationObservation],
+                   let topResult = results.first {
+                    let percentage = String(format: "%2.1f", topResult.confidence * 100)
+                    DispatchQueue.main.async {
+                        result = "\(topResult.identifier) (\(percentage)%)"
+                    }
+                }
+            }
+            let handler = VNImageRequestHandler(cgImage: image, options: [:])
+            try handler.perform([request])
+        } catch {
+            result = error.localizedDescription
         }
     }
 }
